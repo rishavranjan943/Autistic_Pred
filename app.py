@@ -56,7 +56,7 @@ else:
                 features = extract_hog_features(image)
                 
                 # Display HOG feature length for debugging
-                st.write(f"HOG feature length: {features.shape[1]}")
+                # st.write(f"HOG feature length: {features.shape[1]}")
 
                 # Make prediction using the model
                 prediction = model.predict(features)[0]
