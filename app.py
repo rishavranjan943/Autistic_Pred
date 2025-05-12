@@ -63,7 +63,7 @@ if uploaded_file is not None:
                 0.24 * knn_prob +
                 0.20 * rf_prob +
                 0.32 * xgb_prob +
-                0.20 * svm_normalized
+                0.24 * svm_normalized
             )
 
             prediction = 1 if final_score >= 0.5 else 0
