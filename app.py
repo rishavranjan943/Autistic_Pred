@@ -4,66 +4,81 @@ import numpy as np
 import joblib
 import os
 from skimage.feature import hog
+from sklearn.preprocessing import MinMaxScaler
 
 IMAGE_SIZE = (128, 128) 
 MODEL_DIR = 'model'  
 
+# Load models
+try:
+    svm_model = joblib.load(os.path.join(MODEL_DIR, 'svm.pkl'))
+    rf_model = joblib.load(os.path.join(MODEL_DIR, 'rf.pkl'))
+    xgb_model = joblib.load(os.path.join(MODEL_DIR, 'xgb.pkl'))
+    knn_model = joblib.load(os.path.join(MODEL_DIR, 'knn.pkl'))
+except FileNotFoundError as e:
+    st.error(f"Model file not found: {e}")
+    st.stop()
 
 def extract_hog_features(image):
-    # Resize the image to 128x128 and convert to grayscale
-    image = image.resize(IMAGE_SIZE).convert('L')  # Convert to grayscale
+    image = image.resize(IMAGE_SIZE).convert('L')
     image_np = np.array(image)
 
-    # Extract HOG features
     features = hog(image_np,
-                   orientations=9,          # Gradient orientations
-                   pixels_per_cell=(8, 8),  # Cell size for feature extraction
-                   cells_per_block=(2, 2),  # Block size
-                   block_norm='L2-Hys')     # Block normalization
+                   orientations=9,
+                   pixels_per_cell=(8, 8),
+                   cells_per_block=(2, 2),
+                   block_norm='L2-Hys')
 
-    # If the number of features is greater than 7056, truncate to 7056 features
     if len(features) > 7056:
         features = features[:7056]
 
-    # Return as a 2D array with 7056 features (shape: 1 x 7056)
     return features.reshape(1, -1)
 
-# Streamlit UI
-st.title("🧠 Autism Detection from Face Image")
+# UI
+st.title("🧠 Autism Detection from Face Image (Ensemble Prediction)")
 
-# List model files from models directory
-model_files = [f for f in os.listdir(MODEL_DIR) if f.endswith('.pkl')]
+uploaded_file = st.file_uploader("Upload a face image", type=['jpg', 'jpeg', 'png'])
 
-if not model_files:
-    st.error("⚠️ No model files found in the 'models/' directory.")
-else:
-    selected_model = st.selectbox("Select a model file", model_files)
+if uploaded_file is not None:
+    image = Image.open(uploaded_file)
+    st.image(image, caption='Uploaded Image', use_container_width=True)
 
-    # Load the selected model
-    model_path = os.path.join(MODEL_DIR, selected_model)
-    model = joblib.load(model_path)
+    with st.spinner('Extracting features and making prediction...'):
+        try:
+            features = extract_hog_features(image)
 
-    # File uploader for face image
-    uploaded_file = st.file_uploader("Upload a face image", type=['jpg', 'jpeg', 'png'])
+            # Get probabilities or decision scores
+            knn_prob = knn_model.predict_proba(features)[0][1]
+            rf_prob = rf_model.predict_proba(features)[0][1]
+            xgb_prob = xgb_model.predict_proba(features)[0][1]
 
-    if uploaded_file is not None:
-        image = Image.open(uploaded_file)
-        st.image(image, caption='Uploaded Image', use_container_width=True)
+            # SVM: use decision_function then normalize
+            svm_score = svm_model.decision_function(features)[0]
+            # Normalize to [0, 1] using min-max scaler
+            scaler = MinMaxScaler()
+            svm_normalized = scaler.fit_transform([[svm_score], [0]])[0][0]
 
-        with st.spinner('Extracting features and making prediction...'):
-            try:
-                # Extract HOG features
-                features = extract_hog_features(image)
-                
-                # Display HOG feature length for debugging
-                # st.write(f"HOG feature length: {features.shape[1]}")
+            # Weighted sum
+            final_score = (
+                0.24 * knn_prob +
+                0.20 * rf_prob +
+                0.32 * xgb_prob +
+                0.20 * svm_normalized
+            )
 
-                # Make prediction using the model
-                prediction = model.predict(features)[0]
+            prediction = 1 if final_score >= 0.5 else 0
 
-                if prediction == 1:
-                    st.success("🔴 The model predicts **Autistic**.")
-                else:
-                    st.success("🟢 The model predicts **Non-Autistic**.")
-            except Exception as e:
-                st.error(f"Error during prediction: {e}")
+            # Display intermediate values
+            # st.write(f"🔍 KNN Probability (0.24): {knn_prob:.2f}")
+            # st.write(f"🌲 RF Probability (0.20): {rf_prob:.2f}")
+            # st.write(f"⚡ XGB Probability (0.32): {xgb_prob:.2f}")
+            # st.write(f"📈 SVM Raw Score: {svm_score:.2f} → Normalized (0.20): {svm_normalized:.2f}")
+            # st.write(f"📊 Final Weighted Score: {final_score:.2f}")
+
+            if prediction == 1:
+                st.success("🔴 The ensemble model predicts **Autistic**.")
+            else:
+                st.success("🟢 The ensemble model predicts **Non-Autistic**.")
+
+        except Exception as e:
+            st.error(f"Error during prediction: {e}")
